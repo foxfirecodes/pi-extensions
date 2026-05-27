@@ -2,6 +2,15 @@
   "name": "@foxfirecodes/pi-extensions",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/foxfirecodes/pi-extensions.git"
+  },
+  "bugs": {
+    "url": "https://github.com/foxfirecodes/pi-extensions/issues"
+  },
+  "homepage": "https://github.com/foxfirecodes/pi-extensions#readme",
   "type": "module",
   "packageManager": "pnpm@9.12.2",
   "scripts": {

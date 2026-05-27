@@ -1,5 +1,11 @@
 # @foxfirecodes/pi-agents-local-md
 
+## 0.1.4
+
+### Patch Changes
+
+- add license & URLs
+
 ## 0.1.3
 
 ### Patch Changes
