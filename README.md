@@ -1,13 +1,14 @@
 # pi-extensions
 
-Local pnpm monorepo for pi extensions.
+> monorepo for my [pi](https://pi.dev) extensions :3
 
-## Packages
+## packages
 
 - [`packages/pi-agents-local-md`](packages/pi-agents-local-md) — loads `AGENTS.local.md` files as additional pi context.
 
-## Development
+## development
 
 ```bash
+pnpm install
 pnpm test
 ```
