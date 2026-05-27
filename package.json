@@ -10,6 +10,9 @@
     "format:fix": "prettier --write .",
     "prepare": "husky"
   },
+  "lint-staged": {
+    "*.{js,ts,json,md,yaml}": "pnpm format:fix"
+  },
   "devDependencies": {
     "husky": "^9.1.7",
     "lint-staged": "^17.0.5",
