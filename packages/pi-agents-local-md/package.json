@@ -1,5 +1,5 @@
 {
-  "name": "pi-agents-local-md",
+  "name": "@foxfirecodes/pi-agents-local-md",
   "version": "0.1.0",
   "description": "Pi extension that autoloads AGENTS.local.md alongside AGENTS.md context files.",
   "type": "module",
@@ -7,7 +7,6 @@
     "pi-package"
   ],
   "license": "UNLICENSED",
-  "private": true,
   "pi": {
     "extensions": [
       "./extensions/agents-local-md.js"
