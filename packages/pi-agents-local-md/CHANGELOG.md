@@ -1,5 +1,11 @@
 # @foxfirecodes/pi-agents-local-md
 
+## 0.1.3
+
+### Patch Changes
+
+- fucking fix the fucking README for the fucking 50th time
+
 ## 0.1.2
 
 ### Patch Changes
