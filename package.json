@@ -8,7 +8,8 @@
     "test": "pnpm -r test",
     "format": "prettier --check .",
     "format:fix": "prettier --write .",
-    "prepare": "husky"
+    "prepare": "husky",
+    "changeset": "changeset"
   },
   "lint-staged": {
     "*.{js,ts,json,md,yaml}": "pnpm format:fix"
@@ -17,5 +18,8 @@
     "husky": "^9.1.7",
     "lint-staged": "^17.0.5",
     "prettier": "^3.8.3"
+  },
+  "dependencies": {
+    "@changesets/cli": "^2.31.0"
   }
 }
