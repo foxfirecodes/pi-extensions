@@ -17,7 +17,7 @@ The extension respects `--no-context-files` / `-nc` and does not inject local co
 ## Install
 
 ```bash
-pi install npm:@foxfirecodes/pi-agents-local-md`
+pi install npm:@foxfirecodes/pi-agents-local-md
 ```
 
 ## Development
