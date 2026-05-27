@@ -19,13 +19,13 @@ The extension respects `--no-context-files` / `-nc` and does not inject local co
 From this checkout:
 
 ```bash
-pi install /Users/foxfire/code/pi-extensions/packages/pi-agents-local-md
+pi install /path/to/pi-extensions/packages/pi-agents-local-md
 ```
 
 Or try it for one run:
 
 ```bash
-pi -e /Users/foxfire/code/pi-extensions/packages/pi-agents-local-md
+pi -e /path/to/pi-extensions/packages/pi-agents-local-md
 ```
 
 ## Development
