@@ -1,0 +1,31 @@
+{
+  "name": "@foxfirecodes/pi-stash",
+  "version": "0.1.0",
+  "description": "Pi extension that adds a shortcut to stash and restore the current prompt.",
+  "type": "module",
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "prompt",
+    "shortcut",
+    "stash"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/foxfirecodes/pi-extensions.git",
+    "directory": "packages/pi-stash"
+  },
+  "bugs": {
+    "url": "https://github.com/foxfirecodes/pi-extensions/issues"
+  },
+  "homepage": "https://github.com/foxfirecodes/pi-extensions/tree/main/packages/pi-stash#readme",
+  "pi": {
+    "extensions": [
+      "./extensions/pi-stash.js"
+    ]
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  }
+}

@@ -24,6 +24,10 @@ importers:
 
   packages/pi-agents-local-md: {}
 
+  packages/pi-alerts: {}
+
+  packages/pi-stash: {}
+
 packages:
 
   '@babel/runtime@7.29.7':

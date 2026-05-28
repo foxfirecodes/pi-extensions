@@ -1,0 +1,27 @@
+{
+  "name": "@foxfirecodes/pi-alerts",
+  "version": "0.1.0",
+  "description": "Pi extension that rings the terminal bell when pi needs your input.",
+  "type": "module",
+  "keywords": [
+    "pi-package"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/foxfirecodes/pi-extensions.git",
+    "directory": "packages/pi-alerts"
+  },
+  "bugs": {
+    "url": "https://github.com/foxfirecodes/pi-extensions/issues"
+  },
+  "homepage": "https://github.com/foxfirecodes/pi-extensions/tree/main/packages/pi-alerts#readme",
+  "pi": {
+    "extensions": [
+      "./extensions/pi-alerts.js"
+    ]
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  }
+}
