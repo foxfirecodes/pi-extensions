@@ -1,5 +1,11 @@
 # @foxfirecodes/pi-stash
 
+## 0.2.0
+
+### Minor Changes
+
+- e57f667: switch default keybind to ctrl+q
+
 ## 0.1.0
 
 ### Minor Changes
