@@ -12,21 +12,7 @@ This is useful when you have a longer prompt drafted but want to quickly ask or 
 
 ## Keybinding
 
-The default keybinding is `ctrl+s`.
-
-You can customize it with the `--pi-stash-key` extension flag:
-
-```bash
-pi --pi-stash-key ctrl+x
-```
-
-Or with an environment variable:
-
-```bash
-PI_STASH_KEY=ctrl+x pi
-```
-
-The key string uses pi's key format, for example `ctrl+x`, `ctrl+shift+s`, or `alt+s`. If your terminal swallows `ctrl+s` for flow control, choose a different key or disable XON/XOFF flow control in your shell.
+The default keybinding is `ctrl+q`. I will consider adding the ability to configure it later, but for now it's hardcoded.
 
 ## Install
 

@@ -1,11 +1,5 @@
-const DEFAULT_STASH_KEY = "ctrl+s";
-const KEYBIND_FLAG = "pi-stash-key";
+const DEFAULT_STASH_KEY = "ctrl+q";
 const STATUS_ID = "pi-stash";
-
-function configuredKeybind(pi) {
-  const flagValue = pi.getFlag(KEYBIND_FLAG);
-  return typeof flagValue === "string" ? flagValue : DEFAULT_STASH_KEY;
-}
 
 function formatStatus(ctx, keybind) {
   const text = `stash:${keybind}`;
@@ -64,14 +58,8 @@ export default function piStash(pi) {
     ctx.ui.notify("No prompt to stash.", "info");
   }
 
-  pi.registerFlag(KEYBIND_FLAG, {
-    description: `Keybinding for pi-stash prompt stash/restore (default: ${DEFAULT_STASH_KEY})`,
-    type: "string",
-  });
-
   pi.on("session_start", async (_event, ctx) => {
-    keybind = configuredKeybind(pi);
-    pi.registerShortcut(keybind, {
+    pi.registerShortcut(DEFAULT_STASH_KEY, {
       description: "Stash or restore the current prompt",
       handler: stashOrRestorePrompt,
     });
