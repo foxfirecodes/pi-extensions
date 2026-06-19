@@ -110,7 +110,7 @@ async function createFixtureDir() {
   return dir;
 }
 
-function createCommandContext({ branch, hasUI = true } = {}) {
+function createCommandContext({ branch, cwd, hasUI = true } = {}) {
   const commands = new Map();
   const notifications = [];
   const pi = {
@@ -119,6 +119,7 @@ function createCommandContext({ branch, hasUI = true } = {}) {
     },
   };
   const ctx = {
+    cwd,
     hasUI,
     ui: {
       notify(message, type) {
@@ -135,6 +136,71 @@ function createCommandContext({ branch, hasUI = true } = {}) {
 
   piUsage(pi);
   return { commands, notifications, ctx };
+}
+
+async function createProjectFixtureDir(projectDir) {
+  const dir = await mkdtemp(join(tmpdir(), "pi-usage-project-"));
+  const nestedProjectDir = join(projectDir, "packages", "app");
+  const otherProjectDir = join(tmpdir(), "other-project");
+
+  await writeJsonl(join(dir, "project.jsonl"), [
+    {
+      type: "session",
+      id: "project",
+      provider: "openai",
+      cwd: nestedProjectDir,
+    },
+    {
+      type: "message",
+      message: assistant("gpt-5", "openai", usage(100, 50, 0.0015)),
+    },
+  ]);
+
+  await writeJsonl(join(dir, "metadata-project.jsonl"), [
+    {
+      type: "session",
+      id: "metadata-project",
+      provider: "anthropic",
+      metadata: { projectRoot: projectDir },
+    },
+    {
+      type: "message",
+      message: assistant(
+        "claude-sonnet-4-20250514",
+        "anthropic",
+        usage(25, 10, 0.0005),
+      ),
+    },
+  ]);
+
+  await writeFile(
+    join(dir, "other.jsonl"),
+    [
+      JSON.stringify({
+        type: "session",
+        id: "other",
+        provider: "openai",
+        cwd: otherProjectDir,
+      }),
+      "{not-json",
+      JSON.stringify({
+        type: "message",
+        message: assistant("gpt-5-mini", "openai", usage(1000, 500, 0.01)),
+      }),
+      "",
+    ].join("\n"),
+    "utf-8",
+  );
+
+  await writeJsonl(join(dir, "no-project.jsonl"), [
+    { type: "session", id: "no-project", provider: "openai" },
+    {
+      type: "message",
+      message: assistant("gpt-5", "openai", usage(1000, 500, 0.01)),
+    },
+  ]);
+
+  return dir;
 }
 
 test("adds assistant usage to totals and model buckets", () => {
@@ -352,6 +418,29 @@ test("scans multiple default-style roots without double-counting files", async (
   assert.equal(summary.totalTokens, 465);
 });
 
+test("filters session paths to a project", async () => {
+  const projectDir = join(tmpdir(), "pi-usage-current-project");
+  const dir = await createProjectFixtureDir(projectDir);
+  const summary = await scanSessionPaths([dir], { projectPath: projectDir });
+
+  assert.equal(summary.files, 2);
+  assert.equal(summary.sessions, 2);
+  assert.equal(summary.errors, 0);
+  assert.equal(summary.turns, 2);
+  assert.equal(summary.totalTokens, 185);
+  assert.equal(summary.models.size, 2);
+});
+
+test("filters explicit session paths to a project", async () => {
+  const projectDir = join(tmpdir(), "pi-usage-current-project");
+  const dir = await createProjectFixtureDir(projectDir);
+  const summary = await scanSessionPath(dir, { projectPath: projectDir });
+
+  assert.equal(summary.files, 2);
+  assert.equal(summary.sessions, 2);
+  assert.equal(summary.totalTokens, 185);
+});
+
 test("scans a single session file", async () => {
   const dir = await createFixtureDir();
   const summary = await scanSessionFile(join(dir, "one.jsonl"));
@@ -544,6 +633,64 @@ test("reports backfill lifetime usage", async () => {
     notifications[0].message,
     /Scanned: 3 sessions, 3 files, 1 errors/,
   );
+});
+
+test("reports project usage from default roots", async () => {
+  const previousHome = process.env.HOME;
+  const previousPiDir = process.env.PI_CODING_AGENT_DIR;
+  const previousPiSessionDir = process.env.PI_SESSION_DIR;
+  const home = await mkdtemp(join(tmpdir(), "pi-usage-home-"));
+  const projectDir = join(tmpdir(), "pi-usage-current-project");
+  const dir = await createProjectFixtureDir(projectDir);
+  const { commands, notifications, ctx } = createCommandContext({
+    branch: new Error("should not read current branch for --project"),
+    cwd: projectDir,
+  });
+
+  process.env.HOME = home;
+  process.env.PI_SESSION_DIR = dir;
+  delete process.env.PI_CODING_AGENT_DIR;
+
+  try {
+    await commands.get("usage").handler("--project", ctx);
+  } finally {
+    if (previousHome === undefined) {
+      delete process.env.HOME;
+    } else {
+      process.env.HOME = previousHome;
+    }
+    if (previousPiDir === undefined) {
+      delete process.env.PI_CODING_AGENT_DIR;
+    } else {
+      process.env.PI_CODING_AGENT_DIR = previousPiDir;
+    }
+    if (previousPiSessionDir === undefined) {
+      delete process.env.PI_SESSION_DIR;
+    } else {
+      process.env.PI_SESSION_DIR = previousPiSessionDir;
+    }
+  }
+
+  assert.match(notifications[0].message, /Pi project usage/);
+  assert.match(notifications[0].message, /Tokens: 185 total/);
+  assert.match(
+    notifications[0].message,
+    /Scanned: 2 sessions, 2 files, 0 errors/,
+  );
+});
+
+test("reports project usage from explicit paths", async () => {
+  const projectDir = join(tmpdir(), "pi-usage-current-project");
+  const dir = await createProjectFixtureDir(projectDir);
+  const { commands, notifications, ctx } = createCommandContext({
+    branch: new Error("should not read current branch for --project"),
+    cwd: projectDir,
+  });
+
+  await commands.get("usage").handler(`--project --path "${dir}"`, ctx);
+
+  assert.match(notifications[0].message, /Pi project usage/);
+  assert.match(notifications[0].message, /Tokens: 185 total/);
 });
 
 test("reports JSON output", async () => {

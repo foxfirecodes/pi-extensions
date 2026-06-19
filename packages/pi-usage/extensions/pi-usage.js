@@ -1,7 +1,7 @@
 import { createReadStream } from "node:fs";
 import { readdir, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { extname, join } from "node:path";
+import { extname, join, relative, resolve } from "node:path";
 import readline from "node:readline";
 
 const COMMAND_NAME = "usage";
@@ -23,6 +23,62 @@ export function defaultSessionRoots() {
 
 export function defaultSessionRoot() {
   return defaultSessionRoots()[0];
+}
+
+function normalizePath(value) {
+  if (typeof value !== "string" || !value.trim()) return undefined;
+  const expanded = value.startsWith("~")
+    ? join(homedir(), value.slice(1))
+    : value;
+  return resolve(expanded);
+}
+
+function pathsOverlap(a, b) {
+  const first = normalizePath(a);
+  const second = normalizePath(b);
+  if (!first || !second) return false;
+  if (first === second) return true;
+
+  const firstToSecond = relative(first, second);
+  if (firstToSecond && !firstToSecond.startsWith("..") && firstToSecond !== ".")
+    return true;
+
+  const secondToFirst = relative(second, first);
+  return Boolean(
+    secondToFirst && !secondToFirst.startsWith("..") && secondToFirst !== ".",
+  );
+}
+
+function sessionProjectPaths(entry) {
+  const candidates = [
+    entry.cwd,
+    entry.workdir,
+    entry.workingDirectory,
+    entry.project,
+    entry.projectPath,
+    entry.projectRoot,
+    entry.workspace,
+    entry.workspacePath,
+    entry.workspaceRoot,
+    entry.metadata?.cwd,
+    entry.metadata?.workdir,
+    entry.metadata?.workingDirectory,
+    entry.metadata?.project,
+    entry.metadata?.projectPath,
+    entry.metadata?.projectRoot,
+    entry.metadata?.workspace,
+    entry.metadata?.workspacePath,
+    entry.metadata?.workspaceRoot,
+  ];
+
+  return candidates.filter((candidate) => typeof candidate === "string");
+}
+
+function sessionMatchesProject(entry, projectPath) {
+  if (!projectPath) return true;
+  return sessionProjectPaths(entry).some((candidate) =>
+    pathsOverlap(projectPath, candidate),
+  );
 }
 
 export function createUsageSummary() {
@@ -162,7 +218,7 @@ export async function collectSessionFiles(path) {
   return files;
 }
 
-export async function scanSessionFile(filePath) {
+export async function scanSessionFile(filePath, options = {}) {
   const summary = createUsageSummary();
   summary.files = 1;
 
@@ -179,6 +235,7 @@ export async function scanSessionFile(filePath) {
 
   let countedSession = false;
   let fallbackProvider = "unknown";
+  let includeFile = options.projectPath ? false : true;
 
   try {
     for await (const line of reader) {
@@ -188,11 +245,14 @@ export async function scanSessionFile(filePath) {
       try {
         entry = JSON.parse(line);
       } catch {
-        summary.errors++;
+        if (includeFile) summary.errors++;
         continue;
       }
 
       if (entry.type === "session") {
+        includeFile ||= sessionMatchesProject(entry, options.projectPath);
+        if (!includeFile) continue;
+
         if (!countedSession) {
           summary.sessions++;
           countedSession = true;
@@ -201,7 +261,7 @@ export async function scanSessionFile(filePath) {
         continue;
       }
 
-      if (entry.type === "message") {
+      if (includeFile && entry.type === "message") {
         addAssistantUsage(summary, entry.message, fallbackProvider);
       }
     }
@@ -214,13 +274,14 @@ export async function scanSessionFile(filePath) {
   return summary;
 }
 
-export async function scanSessionPath(path) {
+export async function scanSessionPath(path, options = {}) {
   const summary = createUsageSummary();
   const files = await collectSessionFiles(path);
-  summary.files = files.length;
 
   for (const file of files) {
-    const fileSummary = await scanSessionFile(file);
+    const fileSummary = await scanSessionFile(file, options);
+    if (options.projectPath && !fileSummary.sessions) continue;
+    summary.files++;
     addNumbers(summary, fileSummary);
     summary.sessions += fileSummary.sessions;
     summary.errors += fileSummary.errors;
@@ -249,7 +310,7 @@ export async function scanSessionPath(path) {
   return summary;
 }
 
-export async function scanSessionPaths(paths) {
+export async function scanSessionPaths(paths, options = {}) {
   const summary = createUsageSummary();
   const seenFiles = new Set();
 
@@ -259,7 +320,8 @@ export async function scanSessionPaths(paths) {
       if (seenFiles.has(file)) continue;
       seenFiles.add(file);
 
-      const fileSummary = await scanSessionFile(file);
+      const fileSummary = await scanSessionFile(file, options);
+      if (options.projectPath && !fileSummary.sessions) continue;
       summary.files++;
       addNumbers(summary, fileSummary);
       summary.sessions += fileSummary.sessions;
@@ -419,6 +481,7 @@ function parseArgs(args) {
     backfill: false,
     json: false,
     path: undefined,
+    project: false,
   };
 
   for (let index = 0; index < tokens.length; index++) {
@@ -434,6 +497,11 @@ function parseArgs(args) {
     }
     if (arg === "--json") {
       parsed.json = true;
+      continue;
+    }
+    if (arg === "--project") {
+      parsed.all = true;
+      parsed.project = true;
       continue;
     }
     if (arg === "--path" || arg === "-p") {
@@ -461,15 +529,18 @@ function writeReport(report, ctx) {
 
 async function handleUsageCommand(args, ctx) {
   const parsed = parseArgs(args);
+  const projectPath = parsed.project ? (ctx.cwd ?? process.cwd()) : undefined;
   const summary = parsed.all
     ? parsed.path
-      ? await scanSessionPath(parsed.path)
-      : await scanSessionPaths(defaultSessionRoots())
+      ? await scanSessionPath(parsed.path, { projectPath })
+      : await scanSessionPaths(defaultSessionRoots(), { projectPath })
     : summarizeEntries(ctx.sessionManager.getBranch());
   const title = parsed.all
-    ? parsed.backfill
-      ? "Pi backfilled lifetime usage"
-      : "Pi lifetime usage"
+    ? parsed.project
+      ? "Pi project usage"
+      : parsed.backfill
+        ? "Pi backfilled lifetime usage"
+        : "Pi lifetime usage"
     : "Pi current session usage";
   const report = parsed.json
     ? JSON.stringify(serializableSummary(summary), null, 2)
@@ -481,7 +552,7 @@ async function handleUsageCommand(args, ctx) {
 export default function piUsage(pi) {
   pi.registerCommand(COMMAND_NAME, {
     description:
-      "Report token usage and cost. Args: [--all] [--backfill] [--json] [--path file-or-dir]",
+      "Report token usage and cost. Args: [--all] [--backfill] [--project] [--json] [--path file-or-dir]",
     handler: handleUsageCommand,
   });
 }

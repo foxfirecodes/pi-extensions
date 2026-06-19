@@ -15,6 +15,8 @@ The report is grouped by provider and model, and includes turns, input tokens, o
 
 Pi stores provider-reported usage on assistant messages in session JSONL files. This extension reads those `message.usage` fields, so `/usage --all` backfills from historical JSONL files even for sessions where the extension was not installed.
 
+Run `/usage --project` to scan persisted sessions from the default roots but include only session files whose session metadata points at the current project directory. This also works with `--path` to filter a specific session directory or file.
+
 If old session entries do not contain usage metadata, they are skipped because exact usage cannot be reconstructed from transcript text alone.
 
 ## Commands
@@ -23,8 +25,10 @@ If old session entries do not contain usage metadata, they are skipped because e
 /usage
 /usage --all
 /usage --backfill
+/usage --project
 /usage --json
 /usage --all --json
+/usage --project --path /path/to/session-or-directory
 /usage --path /path/to/session-or-directory
 ```
 
