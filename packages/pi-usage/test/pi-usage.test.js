@@ -596,19 +596,27 @@ test("writes reports to stdout when UI is unavailable", async () => {
 });
 
 test("supports lifetime scans from default roots", async () => {
+  const previousHome = process.env.HOME;
   const previousPiDir = process.env.PI_CODING_AGENT_DIR;
   const previousPiSessionDir = process.env.PI_SESSION_DIR;
+  const home = await mkdtemp(join(tmpdir(), "pi-usage-home-"));
   const dir = await createFixtureDir();
   const { commands, notifications, ctx } = createCommandContext({
     branch: new Error("should not read current branch for --all"),
   });
 
+  process.env.HOME = home;
   process.env.PI_SESSION_DIR = dir;
   delete process.env.PI_CODING_AGENT_DIR;
 
   try {
     await commands.get("usage").handler("--all", ctx);
   } finally {
+    if (previousHome === undefined) {
+      delete process.env.HOME;
+    } else {
+      process.env.HOME = previousHome;
+    }
     if (previousPiDir === undefined) {
       delete process.env.PI_CODING_AGENT_DIR;
     } else {
