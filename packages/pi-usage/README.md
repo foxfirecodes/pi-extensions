@@ -1,6 +1,6 @@
 # pi-usage
 
-Pi package that reports token usage and cost from session usage metadata. Test.
+Pi package that reports token usage and cost from session usage metadata.
 
 ## Behavior
 
