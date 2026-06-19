@@ -6,11 +6,23 @@ import readline from "node:readline";
 
 const COMMAND_NAME = "usage";
 
+function uniqueValues(values) {
+  return Array.from(new Set(values.filter(Boolean)));
+}
+
+export function defaultSessionRoots() {
+  return uniqueValues([
+    process.env.PI_SESSION_DIR,
+    process.env.PI_CODING_AGENT_DIR
+      ? join(process.env.PI_CODING_AGENT_DIR, "sessions")
+      : undefined,
+    join(homedir(), ".pi", "agent", "sessions"),
+    join(homedir(), ".pi", "sessions"),
+  ]);
+}
+
 export function defaultSessionRoot() {
-  return join(
-    process.env.PI_CODING_AGENT_DIR ?? join(homedir(), ".pi", "agent"),
-    "sessions",
-  );
+  return defaultSessionRoots()[0];
 }
 
 export function createUsageSummary() {
@@ -237,6 +249,49 @@ export async function scanSessionPath(path) {
   return summary;
 }
 
+export async function scanSessionPaths(paths) {
+  const summary = createUsageSummary();
+  const seenFiles = new Set();
+
+  for (const path of paths) {
+    const files = await collectSessionFiles(path);
+    for (const file of files) {
+      if (seenFiles.has(file)) continue;
+      seenFiles.add(file);
+
+      const fileSummary = await scanSessionFile(file);
+      summary.files++;
+      addNumbers(summary, fileSummary);
+      summary.sessions += fileSummary.sessions;
+      summary.errors += fileSummary.errors;
+
+      for (const row of fileSummary.models.values()) {
+        const existing = summary.models.get(
+          `${row.provider}::${row.model}`,
+        ) ?? {
+          provider: row.provider,
+          model: row.model,
+          turns: 0,
+          inputTokens: 0,
+          outputTokens: 0,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          totalTokens: 0,
+          costInput: 0,
+          costOutput: 0,
+          costCacheRead: 0,
+          costCacheWrite: 0,
+          costTotal: 0,
+        };
+        addNumbers(existing, row);
+        summary.models.set(`${row.provider}::${row.model}`, existing);
+      }
+    }
+  }
+
+  return summary;
+}
+
 export function serializableSummary(summary) {
   return {
     turns: summary.turns,
@@ -305,6 +360,7 @@ export function formatSummary(summary, { title = "Pi usage" } = {}) {
 function parseArgs(args) {
   const parsed = {
     all: false,
+    backfill: false,
     json: false,
     path: undefined,
   };
@@ -313,6 +369,11 @@ function parseArgs(args) {
     const arg = args[index];
     if (arg === "--all" || arg === "-a") {
       parsed.all = true;
+      continue;
+    }
+    if (arg === "--backfill") {
+      parsed.all = true;
+      parsed.backfill = true;
       continue;
     }
     if (arg === "--json") {
@@ -345,9 +406,15 @@ function writeReport(report, ctx) {
 async function handleUsageCommand(args, ctx) {
   const parsed = parseArgs(args);
   const summary = parsed.all
-    ? await scanSessionPath(parsed.path ?? defaultSessionRoot())
+    ? parsed.path
+      ? await scanSessionPath(parsed.path)
+      : await scanSessionPaths(defaultSessionRoots())
     : summarizeEntries(ctx.sessionManager.getBranch());
-  const title = parsed.all ? "Pi lifetime usage" : "Pi current session usage";
+  const title = parsed.all
+    ? parsed.backfill
+      ? "Pi backfilled lifetime usage"
+      : "Pi lifetime usage"
+    : "Pi current session usage";
   const report = parsed.json
     ? JSON.stringify(serializableSummary(summary), null, 2)
     : formatSummary(summary, { title });
@@ -358,7 +425,7 @@ async function handleUsageCommand(args, ctx) {
 export default function piUsage(pi) {
   pi.registerCommand(COMMAND_NAME, {
     description:
-      "Report token usage and cost. Args: [--all] [--json] [--path file-or-dir]",
+      "Report token usage and cost. Args: [--all] [--backfill] [--json] [--path file-or-dir]",
     handler: handleUsageCommand,
   });
 }

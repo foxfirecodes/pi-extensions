@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
@@ -8,9 +8,11 @@ import piUsage, {
   addAssistantUsage,
   collectSessionFiles,
   createUsageSummary,
+  defaultSessionRoots,
   formatSummary,
   scanSessionFile,
   scanSessionPath,
+  scanSessionPaths,
   serializableSummary,
   summarizeEntries,
 } from "../extensions/pi-usage.js";
@@ -131,6 +133,33 @@ test("adds assistant usage to totals and model buckets", () => {
   assert.equal(summary.models.size, 1);
 });
 
+test("discovers Pi session roots", () => {
+  const previousPiDir = process.env.PI_CODING_AGENT_DIR;
+  const previousPiSessionDir = process.env.PI_SESSION_DIR;
+
+  process.env.PI_CODING_AGENT_DIR = "/tmp/pi-agent";
+  process.env.PI_SESSION_DIR = "/tmp/custom-sessions";
+
+  try {
+    assert.deepEqual(defaultSessionRoots().slice(0, 3), [
+      "/tmp/custom-sessions",
+      "/tmp/pi-agent/sessions",
+      join(homedir(), ".pi", "agent", "sessions"),
+    ]);
+  } finally {
+    if (previousPiDir === undefined) {
+      delete process.env.PI_CODING_AGENT_DIR;
+    } else {
+      process.env.PI_CODING_AGENT_DIR = previousPiDir;
+    }
+    if (previousPiSessionDir === undefined) {
+      delete process.env.PI_SESSION_DIR;
+    } else {
+      process.env.PI_SESSION_DIR = previousPiSessionDir;
+    }
+  }
+});
+
 test("summarizes current branch entries", () => {
   const summary = summarizeEntries([
     { type: "message", message: { role: "user", content: "hello" } },
@@ -180,6 +209,16 @@ test("collects and scans session JSONL files recursively", async () => {
   assert.equal(summary.cacheReadTokens, 20);
   assert.equal(summary.totalTokens, 465);
   assert.equal(summary.models.size, 3);
+});
+
+test("scans multiple default-style roots without double-counting files", async () => {
+  const dir = await createFixtureDir();
+  const summary = await scanSessionPaths([dir, dir]);
+
+  assert.equal(summary.files, 3);
+  assert.equal(summary.sessions, 3);
+  assert.equal(summary.turns, 3);
+  assert.equal(summary.totalTokens, 465);
 });
 
 test("scans a single session file", async () => {
