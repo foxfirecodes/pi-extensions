@@ -324,7 +324,10 @@ function formatCost(value) {
   return `$${value.toFixed(4)}`;
 }
 
-export function formatSummary(summary, { title = "Pi usage" } = {}) {
+export function formatSummary(
+  summary,
+  { title = "Pi usage", includeScan = false } = {},
+) {
   const rows = Array.from(summary.models.values()).sort(
     (a, b) => b.totalTokens - a.totalTokens,
   );
@@ -335,7 +338,7 @@ export function formatSummary(summary, { title = "Pi usage" } = {}) {
     `Cost: ${formatCost(summary.costTotal)}`,
   ];
 
-  if (summary.sessions || summary.files || summary.errors) {
+  if (includeScan || summary.sessions || summary.files || summary.errors) {
     lines.push(
       `Scanned: ${formatInteger(summary.sessions)} sessions, ${formatInteger(summary.files)} files, ${formatInteger(summary.errors)} errors`,
     );
@@ -357,7 +360,60 @@ export function formatSummary(summary, { title = "Pi usage" } = {}) {
   return lines.join("\n");
 }
 
+function splitArgs(args) {
+  if (Array.isArray(args)) return args;
+  if (args === undefined || args === null) return [];
+  if (typeof args !== "string") return [];
+
+  const tokens = [];
+  let current = "";
+  let quote;
+  let escaping = false;
+
+  for (const char of args.trim()) {
+    if (escaping) {
+      current += char;
+      escaping = false;
+      continue;
+    }
+
+    if (char === "\\") {
+      escaping = true;
+      continue;
+    }
+
+    if (quote) {
+      if (char === quote) {
+        quote = undefined;
+      } else {
+        current += char;
+      }
+      continue;
+    }
+
+    if (char === '"' || char === "'") {
+      quote = char;
+      continue;
+    }
+
+    if (/\s/.test(char)) {
+      if (current) {
+        tokens.push(current);
+        current = "";
+      }
+      continue;
+    }
+
+    current += char;
+  }
+
+  if (escaping) current += "\\";
+  if (current) tokens.push(current);
+  return tokens;
+}
+
 function parseArgs(args) {
+  const tokens = splitArgs(args);
   const parsed = {
     all: false,
     backfill: false,
@@ -365,8 +421,8 @@ function parseArgs(args) {
     path: undefined,
   };
 
-  for (let index = 0; index < args.length; index++) {
-    const arg = args[index];
+  for (let index = 0; index < tokens.length; index++) {
+    const arg = tokens[index];
     if (arg === "--all" || arg === "-a") {
       parsed.all = true;
       continue;
@@ -381,7 +437,7 @@ function parseArgs(args) {
       continue;
     }
     if (arg === "--path" || arg === "-p") {
-      parsed.path = args[index + 1];
+      parsed.path = tokens[index + 1];
       index++;
       continue;
     }
@@ -417,7 +473,7 @@ async function handleUsageCommand(args, ctx) {
     : "Pi current session usage";
   const report = parsed.json
     ? JSON.stringify(serializableSummary(summary), null, 2)
-    : formatSummary(summary, { title });
+    : formatSummary(summary, { title, includeScan: parsed.all });
 
   writeReport(report, ctx);
 }

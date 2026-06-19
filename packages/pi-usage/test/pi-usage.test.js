@@ -326,3 +326,45 @@ test("reports all sessions from an explicit path", async () => {
     /Scanned: 3 sessions, 3 files, 1 errors/,
   );
 });
+
+test("parses command arguments from Pi string args", async () => {
+  const dir = await createFixtureDir();
+  const commands = new Map();
+  const notifications = [];
+  const pi = {
+    registerCommand(name, options) {
+      commands.set(name, options);
+    },
+  };
+  const ctx = {
+    hasUI: true,
+    ui: {
+      notify(message, type) {
+        notifications.push({ message, type });
+      },
+    },
+    sessionManager: {
+      getBranch() {
+        throw new Error("should not read current branch for --all");
+      },
+    },
+  };
+
+  piUsage(pi);
+  await commands.get("usage").handler(`--all --path "${dir}"`, ctx);
+
+  assert.match(notifications[0].message, /Pi lifetime usage/);
+  assert.match(
+    notifications[0].message,
+    /Scanned: 3 sessions, 3 files, 1 errors/,
+  );
+});
+
+test("shows zero-file scan details for lifetime usage", () => {
+  const formatted = formatSummary(createUsageSummary(), {
+    title: "Pi lifetime usage",
+    includeScan: true,
+  });
+
+  assert.match(formatted, /Scanned: 0 sessions, 0 files, 0 errors/);
+});
