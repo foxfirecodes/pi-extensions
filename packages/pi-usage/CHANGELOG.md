@@ -1,5 +1,12 @@
 # @foxfirecodes/pi-usage
 
+## 0.1.1
+
+### Patch Changes
+
+- b951edb: Cache lifetime usage scans per session file and reuse warmed all-session cache entries for project-scoped usage reports.
+- f1136cb: Add project-scoped lifetime usage scans, robust slash command argument parsing, scan summaries, and backfill support across Pi session roots.
+
 ## Unreleased
 
 ### Patch Changes
