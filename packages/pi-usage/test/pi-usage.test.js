@@ -477,6 +477,53 @@ test("caches unchanged session file summaries and invalidates modified files", a
   }
 });
 
+test("uses all-session cache entries for project scans", async () => {
+  const previousCacheFile = process.env.PI_USAGE_CACHE_FILE;
+  const dir = await mkdtemp(join(tmpdir(), "pi-usage-cache-project-all-"));
+  const projectDir = join(tmpdir(), "pi-usage-cache-project-all-current");
+  const otherProjectDir = join(tmpdir(), "pi-usage-cache-project-all-other");
+  const cacheFile = join(dir, "usage-cache.json");
+  const sessionFile = join(dir, "session.jsonl");
+
+  process.env.PI_USAGE_CACHE_FILE = cacheFile;
+
+  try {
+    await writeJsonl(sessionFile, [
+      { type: "session", id: "one", provider: "openai", cwd: projectDir },
+      {
+        type: "message",
+        message: assistant("gpt-5", "openai", usage(10, 5, 0.0001)),
+      },
+    ]);
+
+    const all = await scanSessionPath(dir);
+    assert.equal(all.totalTokens, 15);
+
+    const cache = JSON.parse(await readFile(cacheFile, "utf-8"));
+    assert.deepEqual(cache.files[sessionFile].summaries.all.projectPaths, [
+      projectDir,
+    ]);
+    cache.files[sessionFile].summaries.all.totalTokens = 999;
+    cache.files[sessionFile].summaries.all.models[0].totalTokens = 999;
+    await writeFile(cacheFile, `${JSON.stringify(cache, null, 2)}\n`, "utf-8");
+
+    const project = await scanSessionPath(dir, { projectPath: projectDir });
+    assert.equal(project.totalTokens, 999);
+
+    const otherProject = await scanSessionPath(dir, {
+      projectPath: otherProjectDir,
+    });
+    assert.equal(otherProject.files, 0);
+    assert.equal(otherProject.totalTokens, 0);
+  } finally {
+    if (previousCacheFile === undefined) {
+      delete process.env.PI_USAGE_CACHE_FILE;
+    } else {
+      process.env.PI_USAGE_CACHE_FILE = previousCacheFile;
+    }
+  }
+});
+
 test("clears cached project variants when a session file changes", async () => {
   const previousCacheFile = process.env.PI_USAGE_CACHE_FILE;
   const dir = await mkdtemp(join(tmpdir(), "pi-usage-cache-variants-"));

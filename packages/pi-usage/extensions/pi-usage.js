@@ -5,7 +5,7 @@ import { dirname, extname, join, relative, resolve } from "node:path";
 import readline from "node:readline";
 
 const COMMAND_NAME = "usage";
-const CACHE_VERSION = 1;
+const CACHE_VERSION = 2;
 const CACHE_VARIANT_ALL = "all";
 
 function uniqueValues(values) {
@@ -109,6 +109,7 @@ export function createUsageSummary() {
     sessions: 0,
     files: 0,
     errors: 0,
+    projectPaths: new Set(),
     models: new Map(),
   };
 }
@@ -129,6 +130,7 @@ function summaryCachePayload(summary) {
     sessions: summary.sessions,
     files: summary.files,
     errors: summary.errors,
+    projectPaths: Array.from(summary.projectPaths ?? []),
     models: Array.from(summary.models.values()),
   };
 }
@@ -151,6 +153,7 @@ function summaryFromCachePayload(payload) {
   summary.sessions = payload.sessions ?? 0;
   summary.files = payload.files ?? 0;
   summary.errors = payload.errors ?? 0;
+  summary.projectPaths = new Set(payload.projectPaths ?? []);
 
   for (const row of payload.models ?? []) {
     if (!row?.provider || !row?.model) continue;
@@ -242,7 +245,18 @@ function cacheHit(entry, fileStat, variant) {
   }
 
   const payload = entry.summaries?.[variant];
-  return payload ? summaryFromCachePayload(payload) : undefined;
+  if (payload) return summaryFromCachePayload(payload);
+
+  const allPayload = entry.summaries?.[CACHE_VARIANT_ALL];
+  if (!variant.startsWith("project:") || !allPayload) return undefined;
+
+  const projectPath = variant.slice("project:".length);
+  const matchesProject = (allPayload.projectPaths ?? []).some((candidate) =>
+    pathsOverlap(projectPath, candidate),
+  );
+  return matchesProject
+    ? summaryFromCachePayload(allPayload)
+    : createUsageSummary();
 }
 
 async function scanSessionFileCached(filePath, options, cache, checkedAt) {
@@ -411,6 +425,10 @@ export async function scanSessionFile(filePath, options = {}) {
       }
 
       if (entry.type === "session") {
+        for (const projectPath of sessionProjectPaths(entry)) {
+          summary.projectPaths.add(projectPath);
+        }
+
         includeFile ||= sessionMatchesProject(entry, options.projectPath);
         if (!includeFile) continue;
 
