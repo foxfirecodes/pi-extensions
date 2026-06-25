@@ -1,5 +1,12 @@
 import assert from "node:assert/strict";
-import { chmod, mkdir, mkdtemp, symlink, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -416,6 +423,109 @@ test("scans multiple default-style roots without double-counting files", async (
   assert.equal(summary.sessions, 3);
   assert.equal(summary.turns, 3);
   assert.equal(summary.totalTokens, 465);
+});
+
+test("caches unchanged session file summaries and invalidates modified files", async () => {
+  const previousCacheFile = process.env.PI_USAGE_CACHE_FILE;
+  const dir = await mkdtemp(join(tmpdir(), "pi-usage-cache-"));
+  const cacheFile = join(dir, "usage-cache.json");
+  const sessionFile = join(dir, "session.jsonl");
+
+  process.env.PI_USAGE_CACHE_FILE = cacheFile;
+
+  try {
+    await writeJsonl(sessionFile, [
+      { type: "session", id: "one", provider: "openai" },
+      {
+        type: "message",
+        message: assistant("gpt-5", "openai", usage(10, 5, 0.0001)),
+      },
+    ]);
+
+    const first = await scanSessionPath(dir);
+    assert.equal(first.totalTokens, 15);
+
+    const cache = JSON.parse(await readFile(cacheFile, "utf-8"));
+    cache.files[sessionFile].summaries.all.totalTokens = 999;
+    cache.files[sessionFile].summaries.all.models[0].totalTokens = 999;
+    await writeFile(cacheFile, `${JSON.stringify(cache, null, 2)}\n`, "utf-8");
+
+    const cached = await scanSessionPath(dir);
+    assert.equal(cached.totalTokens, 999);
+
+    await writeJsonl(sessionFile, [
+      { type: "session", id: "one", provider: "openai" },
+      {
+        type: "message",
+        message: assistant("gpt-5", "openai", usage(10, 5, 0.0001)),
+      },
+      {
+        type: "message",
+        message: assistant("gpt-5", "openai", usage(20, 10, 0.0002)),
+      },
+    ]);
+
+    const changed = await scanSessionPath(dir);
+    assert.equal(changed.totalTokens, 45);
+    assert.equal(changed.models.get("openai::gpt-5").totalTokens, 45);
+  } finally {
+    if (previousCacheFile === undefined) {
+      delete process.env.PI_USAGE_CACHE_FILE;
+    } else {
+      process.env.PI_USAGE_CACHE_FILE = previousCacheFile;
+    }
+  }
+});
+
+test("clears cached project variants when a session file changes", async () => {
+  const previousCacheFile = process.env.PI_USAGE_CACHE_FILE;
+  const dir = await mkdtemp(join(tmpdir(), "pi-usage-cache-variants-"));
+  const projectDir = join(tmpdir(), "pi-usage-cache-project");
+  const cacheFile = join(dir, "usage-cache.json");
+  const sessionFile = join(dir, "session.jsonl");
+
+  process.env.PI_USAGE_CACHE_FILE = cacheFile;
+
+  try {
+    await writeJsonl(sessionFile, [
+      { type: "session", id: "one", provider: "openai", cwd: projectDir },
+      {
+        type: "message",
+        message: assistant("gpt-5", "openai", usage(10, 5, 0.0001)),
+      },
+    ]);
+
+    const projectBefore = await scanSessionPath(dir, {
+      projectPath: projectDir,
+    });
+    assert.equal(projectBefore.totalTokens, 15);
+
+    await writeJsonl(sessionFile, [
+      { type: "session", id: "one", provider: "openai", cwd: projectDir },
+      {
+        type: "message",
+        message: assistant("gpt-5", "openai", usage(10, 5, 0.0001)),
+      },
+      {
+        type: "message",
+        message: assistant("gpt-5", "openai", usage(20, 10, 0.0002)),
+      },
+    ]);
+
+    const allAfterChange = await scanSessionPath(dir);
+    assert.equal(allAfterChange.totalTokens, 45);
+
+    const projectAfterChange = await scanSessionPath(dir, {
+      projectPath: projectDir,
+    });
+    assert.equal(projectAfterChange.totalTokens, 45);
+  } finally {
+    if (previousCacheFile === undefined) {
+      delete process.env.PI_USAGE_CACHE_FILE;
+    } else {
+      process.env.PI_USAGE_CACHE_FILE = previousCacheFile;
+    }
+  }
 });
 
 test("filters session paths to a project", async () => {

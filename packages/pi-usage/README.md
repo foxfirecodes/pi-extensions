@@ -15,6 +15,8 @@ The report is grouped by provider and model, and includes turns, input tokens, o
 
 Pi stores provider-reported usage on assistant messages in session JSONL files. This extension reads those `message.usage` fields, so `/usage --all` backfills from historical JSONL files even for sessions where the extension was not installed.
 
+Lifetime scans cache per-file summaries in `~/.pi/usage-cache.json`. Later `/usage --all` runs still discover session files, but only re-read JSONL files whose size or modification time changed. Set `$PI_USAGE_CACHE_FILE` to override the cache location.
+
 Run `/usage --project` to scan persisted sessions from the default roots but include only session files whose session metadata points at the current project directory. This also works with `--path` to filter a specific session directory or file.
 
 If old session entries do not contain usage metadata, they are skipped because exact usage cannot be reconstructed from transcript text alone.
