@@ -1,10 +1,12 @@
 import { createReadStream } from "node:fs";
-import { readdir, stat } from "node:fs/promises";
+import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { extname, join, relative, resolve } from "node:path";
+import { dirname, extname, join, relative, resolve } from "node:path";
 import readline from "node:readline";
 
 const COMMAND_NAME = "usage";
+const CACHE_VERSION = 2;
+const CACHE_VARIANT_ALL = "all";
 
 function uniqueValues(values) {
   return Array.from(new Set(values.filter(Boolean)));
@@ -23,6 +25,16 @@ export function defaultSessionRoots() {
 
 export function defaultSessionRoot() {
   return defaultSessionRoots()[0];
+}
+
+function defaultUsageCacheFile() {
+  return join(homedir(), ".pi", "usage-cache.json");
+}
+
+function usageCacheFile() {
+  return (
+    normalizePath(process.env.PI_USAGE_CACHE_FILE) ?? defaultUsageCacheFile()
+  );
 }
 
 function normalizePath(value) {
@@ -97,8 +109,58 @@ export function createUsageSummary() {
     sessions: 0,
     files: 0,
     errors: 0,
+    projectPaths: new Set(),
     models: new Map(),
   };
+}
+
+function summaryCachePayload(summary) {
+  return {
+    turns: summary.turns,
+    inputTokens: summary.inputTokens,
+    outputTokens: summary.outputTokens,
+    cacheReadTokens: summary.cacheReadTokens,
+    cacheWriteTokens: summary.cacheWriteTokens,
+    totalTokens: summary.totalTokens,
+    costInput: summary.costInput,
+    costOutput: summary.costOutput,
+    costCacheRead: summary.costCacheRead,
+    costCacheWrite: summary.costCacheWrite,
+    costTotal: summary.costTotal,
+    sessions: summary.sessions,
+    files: summary.files,
+    errors: summary.errors,
+    projectPaths: Array.from(summary.projectPaths ?? []),
+    models: Array.from(summary.models.values()),
+  };
+}
+
+function summaryFromCachePayload(payload) {
+  const summary = createUsageSummary();
+  if (!payload || typeof payload !== "object") return summary;
+
+  summary.turns = payload.turns ?? 0;
+  summary.inputTokens = payload.inputTokens ?? 0;
+  summary.outputTokens = payload.outputTokens ?? 0;
+  summary.cacheReadTokens = payload.cacheReadTokens ?? 0;
+  summary.cacheWriteTokens = payload.cacheWriteTokens ?? 0;
+  summary.totalTokens = payload.totalTokens ?? 0;
+  summary.costInput = payload.costInput ?? 0;
+  summary.costOutput = payload.costOutput ?? 0;
+  summary.costCacheRead = payload.costCacheRead ?? 0;
+  summary.costCacheWrite = payload.costCacheWrite ?? 0;
+  summary.costTotal = payload.costTotal ?? 0;
+  summary.sessions = payload.sessions ?? 0;
+  summary.files = payload.files ?? 0;
+  summary.errors = payload.errors ?? 0;
+  summary.projectPaths = new Set(payload.projectPaths ?? []);
+
+  for (const row of payload.models ?? []) {
+    if (!row?.provider || !row?.model) continue;
+    summary.models.set(`${row.provider}::${row.model}`, row);
+  }
+
+  return summary;
 }
 
 function addNumbers(target, source) {
@@ -113,6 +175,119 @@ function addNumbers(target, source) {
   target.costCacheRead += source.costCacheRead;
   target.costCacheWrite += source.costCacheWrite;
   target.costTotal += source.costTotal;
+}
+
+function addModelRows(target, source) {
+  for (const row of source.models.values()) {
+    const existing = target.models.get(`${row.provider}::${row.model}`) ?? {
+      provider: row.provider,
+      model: row.model,
+      turns: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      totalTokens: 0,
+      costInput: 0,
+      costOutput: 0,
+      costCacheRead: 0,
+      costCacheWrite: 0,
+      costTotal: 0,
+    };
+    addNumbers(existing, row);
+    target.models.set(`${row.provider}::${row.model}`, existing);
+  }
+}
+
+function addFileSummary(target, fileSummary) {
+  target.files++;
+  addNumbers(target, fileSummary);
+  target.sessions += fileSummary.sessions;
+  target.errors += fileSummary.errors;
+  addModelRows(target, fileSummary);
+}
+
+async function loadUsageCache() {
+  try {
+    const content = await readFile(usageCacheFile(), "utf-8");
+    const cache = JSON.parse(content);
+    if (cache?.version === CACHE_VERSION && cache.files) return cache;
+  } catch {
+    // Cache misses and corrupt cache files should never block usage reports.
+  }
+
+  return {
+    version: CACHE_VERSION,
+    lastCheckedAt: undefined,
+    files: {},
+  };
+}
+
+async function saveUsageCache(cache) {
+  const cacheFile = usageCacheFile();
+  try {
+    await mkdir(dirname(cacheFile), { recursive: true });
+    await writeFile(cacheFile, `${JSON.stringify(cache, null, 2)}\n`, "utf-8");
+  } catch {
+    // Reports are still useful even when the cache cannot be persisted.
+  }
+}
+
+function cacheVariant(options) {
+  if (!options.projectPath) return CACHE_VARIANT_ALL;
+  return `project:${normalizePath(options.projectPath) ?? options.projectPath}`;
+}
+
+function cacheHit(entry, fileStat, variant) {
+  if (!entry) return undefined;
+  if (entry.size !== fileStat.size || entry.mtimeMs !== fileStat.mtimeMs) {
+    return undefined;
+  }
+
+  const payload = entry.summaries?.[variant];
+  if (payload) return summaryFromCachePayload(payload);
+
+  const allPayload = entry.summaries?.[CACHE_VARIANT_ALL];
+  if (!variant.startsWith("project:") || !allPayload) return undefined;
+
+  const projectPath = variant.slice("project:".length);
+  const matchesProject = (allPayload.projectPaths ?? []).some((candidate) =>
+    pathsOverlap(projectPath, candidate),
+  );
+  return matchesProject
+    ? summaryFromCachePayload(allPayload)
+    : createUsageSummary();
+}
+
+async function scanSessionFileCached(filePath, options, cache, checkedAt) {
+  let fileStat;
+  try {
+    fileStat = await stat(filePath);
+  } catch {
+    return scanSessionFile(filePath, options);
+  }
+
+  const variant = cacheVariant(options);
+  const cachedSummary = cacheHit(cache.files[filePath], fileStat, variant);
+  if (cachedSummary) {
+    cache.files[filePath].checkedAt = checkedAt;
+    return cachedSummary;
+  }
+
+  const summary = await scanSessionFile(filePath, options);
+  const existingEntry = cache.files[filePath];
+  const entry =
+    existingEntry?.size === fileStat.size &&
+    existingEntry?.mtimeMs === fileStat.mtimeMs
+      ? existingEntry
+      : { summaries: {} };
+  entry.size = fileStat.size;
+  entry.mtimeMs = fileStat.mtimeMs;
+  entry.checkedAt = checkedAt;
+  entry.summaries = entry.summaries ?? {};
+  entry.summaries[variant] = summaryCachePayload(summary);
+  cache.files[filePath] = entry;
+  return summary;
 }
 
 function usageToStats(usage) {
@@ -250,6 +425,10 @@ export async function scanSessionFile(filePath, options = {}) {
       }
 
       if (entry.type === "session") {
+        for (const projectPath of sessionProjectPaths(entry)) {
+          summary.projectPaths.add(projectPath);
+        }
+
         includeFile ||= sessionMatchesProject(entry, options.projectPath);
         if (!includeFile) continue;
 
@@ -277,42 +456,30 @@ export async function scanSessionFile(filePath, options = {}) {
 export async function scanSessionPath(path, options = {}) {
   const summary = createUsageSummary();
   const files = await collectSessionFiles(path);
+  const cache = await loadUsageCache();
+  const checkedAt = new Date().toISOString();
 
   for (const file of files) {
-    const fileSummary = await scanSessionFile(file, options);
+    const fileSummary = await scanSessionFileCached(
+      file,
+      options,
+      cache,
+      checkedAt,
+    );
     if (options.projectPath && !fileSummary.sessions) continue;
-    summary.files++;
-    addNumbers(summary, fileSummary);
-    summary.sessions += fileSummary.sessions;
-    summary.errors += fileSummary.errors;
-
-    for (const row of fileSummary.models.values()) {
-      const existing = summary.models.get(`${row.provider}::${row.model}`) ?? {
-        provider: row.provider,
-        model: row.model,
-        turns: 0,
-        inputTokens: 0,
-        outputTokens: 0,
-        cacheReadTokens: 0,
-        cacheWriteTokens: 0,
-        totalTokens: 0,
-        costInput: 0,
-        costOutput: 0,
-        costCacheRead: 0,
-        costCacheWrite: 0,
-        costTotal: 0,
-      };
-      addNumbers(existing, row);
-      summary.models.set(`${row.provider}::${row.model}`, existing);
-    }
+    addFileSummary(summary, fileSummary);
   }
 
+  cache.lastCheckedAt = checkedAt;
+  await saveUsageCache(cache);
   return summary;
 }
 
 export async function scanSessionPaths(paths, options = {}) {
   const summary = createUsageSummary();
   const seenFiles = new Set();
+  const cache = await loadUsageCache();
+  const checkedAt = new Date().toISOString();
 
   for (const path of paths) {
     const files = await collectSessionFiles(path);
@@ -320,37 +487,19 @@ export async function scanSessionPaths(paths, options = {}) {
       if (seenFiles.has(file)) continue;
       seenFiles.add(file);
 
-      const fileSummary = await scanSessionFile(file, options);
+      const fileSummary = await scanSessionFileCached(
+        file,
+        options,
+        cache,
+        checkedAt,
+      );
       if (options.projectPath && !fileSummary.sessions) continue;
-      summary.files++;
-      addNumbers(summary, fileSummary);
-      summary.sessions += fileSummary.sessions;
-      summary.errors += fileSummary.errors;
-
-      for (const row of fileSummary.models.values()) {
-        const existing = summary.models.get(
-          `${row.provider}::${row.model}`,
-        ) ?? {
-          provider: row.provider,
-          model: row.model,
-          turns: 0,
-          inputTokens: 0,
-          outputTokens: 0,
-          cacheReadTokens: 0,
-          cacheWriteTokens: 0,
-          totalTokens: 0,
-          costInput: 0,
-          costOutput: 0,
-          costCacheRead: 0,
-          costCacheWrite: 0,
-          costTotal: 0,
-        };
-        addNumbers(existing, row);
-        summary.models.set(`${row.provider}::${row.model}`, existing);
-      }
+      addFileSummary(summary, fileSummary);
     }
   }
 
+  cache.lastCheckedAt = checkedAt;
+  await saveUsageCache(cache);
   return summary;
 }
 
